@@ -336,6 +336,7 @@
   }
   svg.plan.panning { cursor: grabbing; }
   svg.plan.placing { cursor: crosshair; }
+  svg.plan.drawing { cursor: crosshair; }
 
   .wall { stroke: var(--ink); stroke-linecap: square; }
   .wall-cap { fill: var(--ink); }
@@ -524,6 +525,11 @@
 
   <main class="canvas">
     <div class="toolbar">
+      <button class="icon" id="draw-btn" title="Draw a wall — click to start, type length or click to set end">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M2 14L11 5"/><path d="M9 3l4 4-2 2-4-4z"/><path d="M2 14l1.5-3.5"/>
+        </svg>
+      </button>
       <button class="icon" id="zoom-fit-btn" title="Fit to view">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3"/>
@@ -580,6 +586,12 @@
 
     <span class="label">Shortcuts</span>
     <div class="hint" style="line-height:1.8">
+      <strong>Draw Wall</strong> (pencil icon, top-left):<br>
+      &nbsp;&nbsp;Click start → click end<br>
+      &nbsp;&nbsp;Or click start, type length, Enter<br>
+      &nbsp;&nbsp;Walls chain — keep clicking<br>
+      &nbsp;&nbsp;<code>Shift</code> for free angle<br>
+      <br>
       <code>R</code> rotate 90°<br>
       <code>Shift+R</code> rotate 15°<br>
       <code>Del</code> delete selection<br>
@@ -607,6 +619,7 @@ const state = {
   zoom: 1,                     // multiplier; 1 = fit
   pan: { x: 0, y: 0 },
   placing: null,               // furniture type if placing, else null
+  drawing: null,               // {start, current, typed} when drawing a wall
   drag: null,                  // current drag state
 };
 
@@ -1182,6 +1195,32 @@ function render() {
   // ---- Labels (on top of walls) ----
   parts.push(renderLabels(unitPerPx));
 
+  // ---- Draw-mode preview ----
+  if (state.drawing && state.drawing.start) {
+    const s = state.drawing.start;
+    const c = state.drawing.current || s;
+    const len = Math.hypot(c.x - s.x, c.y - s.y);
+    const dash = `${unitPerPx * 5},${unitPerPx * 3}`;
+    const labelSize = unitPerPx * 13;
+    parts.push(`
+      <g class="draw-preview" pointer-events="none">
+        <line x1="${s.x}" y1="${s.y}" x2="${c.x}" y2="${c.y}"
+              stroke="#b8552b" stroke-width="${state.wallThickness * 0.7}"
+              stroke-dasharray="${dash}" stroke-linecap="round"/>
+        <circle cx="${s.x}" cy="${s.y}" r="${unitPerPx * 4}"
+                fill="#b8552b" stroke="#f3ede1" stroke-width="${unitPerPx}"/>
+        <circle cx="${c.x}" cy="${c.y}" r="${unitPerPx * 3}"
+                fill="#f3ede1" stroke="#b8552b" stroke-width="${unitPerPx * 1.2}"/>
+        ${len > 0.05 ? `<text x="${(s.x + c.x) / 2}" y="${(s.y + c.y) / 2 - unitPerPx * 9}"
+                font-family="IBM Plex Mono, monospace" font-size="${labelSize}"
+                fill="#b8552b" text-anchor="middle" font-weight="500"
+                paint-order="stroke" stroke="#f3ede1" stroke-width="${unitPerPx * 3}">${
+          state.drawing.typed ? state.drawing.typed + (state.unit === 'm' ? 'm' : "'") : fmt(len)
+        }</text>` : ''}
+      </g>
+    `);
+  }
+
   // ---- Origin marker ----
   parts.push(`
     <g opacity="0.4">
@@ -1477,13 +1516,99 @@ function nextId() { return 'f' + Date.now().toString(36) + Math.random().toStrin
 
 function beginPlace(type) {
   state.placing = type;
+  if (state.drawing) endDraw();
+  const banner = document.getElementById('placing-banner');
+  banner.textContent = 'Placing furniture — click on the plan, or press Esc to cancel';
+  banner.classList.add('show');
   document.getElementById('svg').classList.add('placing');
-  document.getElementById('placing-banner').classList.add('show');
 }
 function endPlace() {
   state.placing = null;
   document.getElementById('svg').classList.remove('placing');
   document.getElementById('placing-banner').classList.remove('show');
+}
+
+/* ============================================================
+ * Wall drawing mode
+ * Click button → click start → click end (or type length + Enter).
+ * Walls chain (next start = last end) so hallways draw quickly.
+ * ============================================================ */
+function beginDraw() {
+  if (state.placing) endPlace();
+  state.drawing = { start: null, current: null, typed: '' };
+  document.getElementById('svg').classList.add('drawing');
+  document.getElementById('draw-btn').style.background = 'var(--paper-2)';
+  updateDrawBanner();
+}
+function endDraw() {
+  state.drawing = null;
+  document.getElementById('svg').classList.remove('drawing');
+  document.getElementById('draw-btn').style.background = '';
+  document.getElementById('placing-banner').classList.remove('show');
+}
+function updateDrawBanner() {
+  const b = document.getElementById('placing-banner');
+  if (!state.drawing) { b.classList.remove('show'); return; }
+  let msg;
+  if (!state.drawing.start) {
+    msg = 'Click to start a wall  •  Esc to exit';
+  } else if (state.drawing.typed) {
+    msg = `Length: ${state.drawing.typed}${state.unit === 'm' ? 'm' : "'"}  •  click to set direction, Enter to commit, Backspace to edit`;
+  } else {
+    msg = 'Click to set end  •  Type a length then Enter  •  Shift = free angle  •  Esc to cancel';
+  }
+  b.textContent = msg;
+  b.classList.add('show');
+}
+function snapDrawPoint(p, lockOrtho) {
+  // Snap to nearby existing wall endpoints (within 1 ft); otherwise
+  // optionally lock to orthogonal direction from the drawing start.
+  const SNAP = 1.0; // ft
+  let best = null, bestDist = SNAP;
+  state.walls.forEach(w => {
+    [w.a, w.b].forEach(ep => {
+      const d = Math.hypot(p.x - ep.x, p.y - ep.y);
+      if (d < bestDist) { bestDist = d; best = ep; }
+    });
+  });
+  if (best) return { x: best.x, y: best.y };
+  if (lockOrtho && state.drawing && state.drawing.start) {
+    const s = state.drawing.start;
+    const dx = p.x - s.x, dy = p.y - s.y;
+    if (Math.abs(dx) > Math.abs(dy)) return { x: p.x, y: s.y };
+    return { x: s.x, y: p.y };
+  }
+  return p;
+}
+function commitDrawnWall(a, b) {
+  // Don't add zero-length walls
+  if (Math.hypot(b.x - a.x, b.y - a.y) < 0.01) return;
+  const ta = document.getElementById('wall-input');
+  const toUnit = n => state.unit === 'm' ? n * 0.3048 : n;
+  const r = n => +(toUnit(n).toFixed(2));
+  const newLine = `wall ${r(a.x)},${r(a.y)} to ${r(b.x)},${r(b.y)}`;
+  const cur = ta.value;
+  ta.value = (cur && !cur.endsWith('\n')) ? cur + '\n' + newLine : cur + newLine;
+  rebuildFromInput();
+}
+function commitDrawnWithTypedLength() {
+  if (!state.drawing || !state.drawing.start || !state.drawing.typed) return false;
+  const len = parseFloat(state.drawing.typed);
+  if (isNaN(len) || len <= 0) return false;
+  const lenFt = state.unit === 'm' ? len * 3.28084 : len;
+  const s = state.drawing.start;
+  const c = state.drawing.current || s;
+  const dx = c.x - s.x, dy = c.y - s.y;
+  const d = Math.hypot(dx, dy);
+  if (d < 0.001) return false;
+  const end = { x: s.x + (dx / d) * lenFt, y: s.y + (dy / d) * lenFt };
+  commitDrawnWall(s, end);
+  state.drawing.start = end;
+  state.drawing.current = end;
+  state.drawing.typed = '';
+  updateDrawBanner();
+  render();
+  return true;
 }
 
 function addFurniture(type, x, y) {
@@ -1521,6 +1646,29 @@ function setupSvgEvents() {
 
   svg.addEventListener('mousedown', (e) => {
     const target = e.target;
+    // Drawing mode takes priority over selection/pan
+    if (state.drawing) {
+      const w = svgToWorld(e);
+      const lockOrtho = !e.shiftKey;
+      const p = snapDrawPoint(w, lockOrtho);
+      if (!state.drawing.start) {
+        state.drawing.start = p;
+        state.drawing.current = p;
+      } else {
+        // If user typed a length, prefer that; otherwise commit at click point
+        if (state.drawing.typed && commitDrawnWithTypedLength()) {
+          // typed-length commit handles everything
+        } else {
+          commitDrawnWall(state.drawing.start, p);
+          state.drawing.start = p;       // chain for next segment
+          state.drawing.current = p;
+          state.drawing.typed = '';
+        }
+      }
+      updateDrawBanner();
+      render();
+      return;
+    }
     // Rotate handle?
     const rotEl = target.closest('[data-rotate-id]');
     if (rotEl) {
@@ -1559,6 +1707,15 @@ function setupSvgEvents() {
   });
 
   window.addEventListener('mousemove', (e) => {
+    // Live preview while drawing a wall
+    if (state.drawing && state.drawing.start) {
+      const w = svgToWorld(e);
+      const lockOrtho = !e.shiftKey;
+      state.drawing.current = snapDrawPoint(w, lockOrtho);
+      render();
+      // Don't return — pan/drag of furniture isn't possible mid-draw, but
+      // letting other handlers run is harmless since state.drag is null.
+    }
     if (!state.drag) return;
     if (state.drag.kind === 'move') {
       const f = state.furniture.find(x => x.id === state.drag.id);
@@ -1746,6 +1903,10 @@ function init() {
   document.getElementById('zoom-in-btn').addEventListener('click', () => { state.zoom *= 1.25; render(); });
   document.getElementById('zoom-out-btn').addEventListener('click', () => { state.zoom /= 1.25; render(); });
   document.getElementById('zoom-fit-btn').addEventListener('click', () => { state.zoom = 1; state.pan = {x:0,y:0}; render(); });
+  document.getElementById('draw-btn').addEventListener('click', () => {
+    if (state.drawing) endDraw(); else beginDraw();
+    render();
+  });
   document.getElementById('grid-btn').addEventListener('click', (e) => {
     state.showGrid = !state.showGrid;
     e.currentTarget.style.background = state.showGrid ? 'var(--paper-2)' : '';
@@ -1776,6 +1937,50 @@ function init() {
   // Keyboard
   window.addEventListener('keydown', (e) => {
     if (e.target.matches('input, textarea')) return;
+
+    // ---- Draw mode keyboard handling ----
+    if (state.drawing) {
+      if (state.drawing.start) {
+        // Type digits/decimal to set explicit length
+        if (/^[0-9]$/.test(e.key) || e.key === '.') {
+          state.drawing.typed += e.key;
+          updateDrawBanner();
+          render();
+          e.preventDefault();
+          return;
+        }
+        if (e.key === 'Backspace') {
+          state.drawing.typed = state.drawing.typed.slice(0, -1);
+          updateDrawBanner();
+          render();
+          e.preventDefault();
+          return;
+        }
+        if (e.key === 'Enter') {
+          commitDrawnWithTypedLength();
+          e.preventDefault();
+          return;
+        }
+      }
+      if (e.key === 'Escape') {
+        if (state.drawing.start) {
+          // Cancel current segment, stay in draw mode
+          state.drawing.start = null;
+          state.drawing.current = null;
+          state.drawing.typed = '';
+          updateDrawBanner();
+          render();
+        } else {
+          endDraw();
+          render();
+        }
+        e.preventDefault();
+        return;
+      }
+      // While drawing, don't fall through to selection/delete shortcuts
+      return;
+    }
+
     if (e.key === 'Escape') { state.selectedId = null; endPlace(); render(); updateProperties(); }
     if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
     if (e.key === 'r' || e.key === 'R') {
