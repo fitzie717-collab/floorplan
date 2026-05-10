@@ -339,6 +339,7 @@
   svg.plan.drawing { cursor: crosshair; }
 
   .wall { stroke: var(--ink); stroke-linecap: square; }
+  .wall.selected { stroke: var(--accent); }
   .wall-cap { fill: var(--ink); }
   .vertex { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
 
@@ -348,6 +349,7 @@
     fill: var(--ink-soft);
     text-anchor: middle;
     dominant-baseline: middle;
+    pointer-events: none;
   }
 
   .grid-line { stroke: var(--grid); stroke-width: 0.5; }
@@ -592,6 +594,9 @@
       &nbsp;&nbsp;Walls chain — keep clicking<br>
       &nbsp;&nbsp;<code>Shift</code> for free angle<br>
       <br>
+      <strong>Delete a wall</strong>:<br>
+      &nbsp;&nbsp;Click the wall → press <code>Del</code><br>
+      <br>
       <code>R</code> rotate 90°<br>
       <code>Shift+R</code> rotate 15°<br>
       <code>Del</code> delete selection<br>
@@ -611,6 +616,7 @@ const state = {
   labels: [],                  // {text, x, y, line}
   furniture: [],               // {id, type, name, x, y, w, h, rotation}
   selectedId: null,
+  selectedWallLine: null,      // source-text line number of the currently-selected wall(s)
   showGrid: true,
   showDimensions: false,
   snapToGrid: false,
@@ -727,7 +733,8 @@ move 8 left
 rect 0,0 30x12.5                  # Workshop (30'-1" x 12'-0½")
 rect 0,12.5 22.3x24               # Garage (22'-3½" x ~24')
 rect 22.3,12.5 12.9x7              # Utility 1
-rect 22.3,19.5 12.9x8.5            # Storage / Laundry / Lockers
+rect 22.3,19.5 4x8.5               # Storage / IT closet (4'-0½" wide)
+rect 26.3,19.5 8.9x8.5             # Laundry / Lockers
 rect 22.3,28 14x5.4                # Mudroom / Seat-Cubbies
 rect 0,36.5 22.3x8                 # Storage strip (between Garage and ADU)
 
@@ -792,8 +799,9 @@ rect 166.75,41.06 15.25x7.1          # Master Enclosed Patio (15'-3" x 7'-1½")
 # ----- ROOM LABELS -----
 label "Workshop" at 15,6
 label "Garage" at 11,24
-label "Utility" at 28.7,16
-label "Laundry" at 28.7,23.7
+label "Utility 1" at 28.7,16
+label "Storage" at 24.3,23.7
+label "Laundry" at 30.7,23.7
 label "Mudroom" at 29.3,30.7
 label "Storage" at 11,40.5
 
@@ -1212,6 +1220,9 @@ function render() {
     parts.push(g);
   }
 
+  // ---- Wall hit areas (transparent, below visible content; catches wall clicks) ----
+  parts.push(renderWallHitAreas(unitPerPx));
+
   // ---- Furniture (under walls so walls visually contain) ----
   parts.push(renderFurniture(unitPerPx));
 
@@ -1275,13 +1286,31 @@ function renderLabels(unitPerPx) {
   }</g>`;
 }
 
+function renderWallHitAreas(unitPerPx) {
+  // Transparent thick lines underneath everything else so walls are clickable
+  // without their hit area visually obscuring furniture.
+  if (state.walls.length === 0) return '';
+  const hitWidth = Math.max(state.wallThickness * 1.5, unitPerPx * 6);
+  let out = `<g class="wall-hits">`;
+  state.walls.forEach(w => {
+    out += `<line data-wall-line="${w.line}" `
+        +  `x1="${w.a.x}" y1="${w.a.y}" x2="${w.b.x}" y2="${w.b.y}" `
+        +  `stroke="transparent" stroke-width="${hitWidth}" `
+        +  `stroke-linecap="round" pointer-events="stroke" `
+        +  `style="cursor: pointer"/>`;
+  });
+  out += `</g>`;
+  return out;
+}
+
 function renderWalls(unitPerPx) {
   if (state.walls.length === 0) return '';
   const t = state.wallThickness;
   let out = `<g class="walls">`;
-  // Render the wall strokes
+  // Render the wall strokes (no pointer-events; the hit layer beneath catches clicks)
   state.walls.forEach(w => {
-    out += `<line class="wall" x1="${w.a.x}" y1="${w.a.y}" x2="${w.b.x}" y2="${w.b.y}" stroke-width="${t}"/>`;
+    const cls = (w.line === state.selectedWallLine) ? 'wall selected' : 'wall';
+    out += `<line class="${cls}" x1="${w.a.x}" y1="${w.a.y}" x2="${w.b.x}" y2="${w.b.y}" stroke-width="${t}" pointer-events="none"/>`;
   });
   // Optionally render dimension labels — deduped, so overlapping walls
   // (e.g. shared edges of adjacent rooms) don't stack labels.
@@ -1313,7 +1342,7 @@ function renderWalls(unitPerPx) {
       const k = `${p.x.toFixed(3)},${p.y.toFixed(3)}`;
       if (vSeen.has(k)) return;
       vSeen.add(k);
-      out += `<circle class="vertex" cx="${p.x}" cy="${p.y}" r="${t * 0.7}" stroke-width="${unitPerPx*0.8}"/>`;
+      out += `<circle class="vertex" cx="${p.x}" cy="${p.y}" r="${t * 0.7}" stroke-width="${unitPerPx*0.8}" pointer-events="none"/>`;
     });
   });
   out += `</g>`;
@@ -1460,6 +1489,30 @@ function updatePlanInfo() {
 
 function updateProperties() {
   const el = document.getElementById('props');
+  // Wall selected?
+  if (state.selectedWallLine) {
+    const ta = document.getElementById('wall-input');
+    const lines = ta.value.split('\n');
+    const sourceText = (lines[state.selectedWallLine - 1] || '').trim();
+    el.innerHTML = `
+      <div class="row"><span class="k">Wall</span><span class="v">line ${state.selectedWallLine}</span></div>
+      <div class="row" style="flex-direction:column;align-items:stretch">
+        <span class="k" style="margin-bottom:4px">Source</span>
+        <span class="v" style="font-family:var(--mono);font-size:11px;background:var(--paper-2);padding:6px 8px;border-radius:3px;white-space:pre-wrap;word-break:break-all">${escapeHtml(sourceText) || '<em style="color:var(--ink-soft)">(empty)</em>'}</span>
+      </div>
+      <div class="btn-row" style="margin-top:10px">
+        <button data-act="delete-wall" class="accent">Delete (Del)</button>
+      </div>
+      <p class="hint" style="margin-top:10px">
+        Tip: a <code>rect</code> command makes 4 walls — deleting removes the whole rect.
+        For finer control, use <code>wall x,y to x,y</code> for individual walls.
+      </p>
+    `;
+    el.querySelector('[data-act="delete-wall"]').addEventListener('click', () => {
+      deleteWallByLine(state.selectedWallLine);
+    });
+    return;
+  }
   if (!state.selectedId) {
     el.innerHTML = `<div class="empty">Click an item on the plan to inspect or edit it.</div>`;
     return;
@@ -1664,6 +1717,22 @@ function deleteSelected() {
   render(); updateProperties();
 }
 
+function deleteWallByLine(lineNum) {
+  if (!lineNum) return;
+  const ta = document.getElementById('wall-input');
+  const lines = ta.value.split('\n');
+  if (lineNum < 1 || lineNum > lines.length) return;
+  lines.splice(lineNum - 1, 1);
+  ta.value = lines.join('\n');
+  state.selectedWallLine = null;
+  rebuildFromInput();
+  updateProperties();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":"&#39;"})[c]);
+}
+
 /* ============================================================
  * SVG interactions
  * ============================================================ */
@@ -1710,9 +1779,18 @@ function setupSvgEvents() {
     if (furnEl) {
       const id = furnEl.dataset.furnId;
       state.selectedId = id;
+      state.selectedWallLine = null;
       const w = svgToWorld(e);
       const f = state.furniture.find(x => x.id === id);
       state.drag = { kind: 'move', id, dx: f.x - w.x, dy: f.y - w.y };
+      render(); updateProperties();
+      return;
+    }
+    // Wall click?
+    const wallEl = target.closest('[data-wall-line]');
+    if (wallEl) {
+      state.selectedWallLine = parseInt(wallEl.dataset.wallLine, 10);
+      state.selectedId = null;
       render(); updateProperties();
       return;
     }
@@ -1726,6 +1804,7 @@ function setupSvgEvents() {
     }
     // Otherwise pan
     state.selectedId = null;
+    state.selectedWallLine = null;
     render(); updateProperties();
     state.drag = { kind: 'pan', startX: e.clientX, startY: e.clientY,
                    startPanX: state.pan.x, startPanY: state.pan.y };
@@ -2007,8 +2086,14 @@ function init() {
       return;
     }
 
-    if (e.key === 'Escape') { state.selectedId = null; endPlace(); render(); updateProperties(); }
-    if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
+    if (e.key === 'Escape') { state.selectedId = null; state.selectedWallLine = null; endPlace(); render(); updateProperties(); }
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (state.selectedWallLine) {
+        deleteWallByLine(state.selectedWallLine);
+      } else {
+        deleteSelected();
+      }
+    }
     if (e.key === 'r' || e.key === 'R') {
       const f = state.furniture.find(x => x.id === state.selectedId);
       if (!f) return;
