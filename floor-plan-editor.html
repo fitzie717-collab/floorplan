@@ -1,0 +1,1797 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Drafting Table — Floor Plan Editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ---------- Tokens ---------- */
+  :root {
+    --paper: #f3ede1;        /* warm cream */
+    --paper-2: #ebe3d2;      /* slightly darker cream */
+    --ink: #1a2b47;          /* deep navy */
+    --ink-soft: #3a4a66;
+    --pencil: #b8a98a;       /* light pencil */
+    --grid: #d6cab0;
+    --accent: #b8552b;       /* burnt ochre */
+    --accent-2: #d77a3a;
+    --good: #4a6b3a;
+    --bad: #a23a3a;
+    --shadow: 0 1px 2px rgba(26,43,71,.06), 0 8px 24px rgba(26,43,71,.08);
+    --serif: "Fraunces", Georgia, serif;
+    --sans:  "Inter", system-ui, sans-serif;
+    --mono:  "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--paper);
+    font-size: 14px;
+    overflow: hidden;
+    /* subtle paper grain */
+    background-image:
+      radial-gradient(rgba(26,43,71,0.025) 1px, transparent 1px),
+      radial-gradient(rgba(26,43,71,0.02) 1px, transparent 1px);
+    background-size: 3px 3px, 7px 7px;
+    background-position: 0 0, 1px 2px;
+  }
+
+  /* ---------- Layout ---------- */
+  .app {
+    display: grid;
+    grid-template-columns: 320px 1fr 260px;
+    grid-template-rows: 56px 1fr;
+    height: 100vh;
+  }
+  header {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 22px;
+    border-bottom: 1px solid var(--pencil);
+    background: var(--paper);
+  }
+  header .brand {
+    display: flex; align-items: baseline; gap: 14px;
+  }
+  header h1 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 22px;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  header .sub {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  header .tools { display: flex; gap: 8px; align-items: center; }
+
+  aside.left, aside.right {
+    border-right: 1px solid var(--pencil);
+    background: var(--paper);
+    overflow-y: auto;
+    padding: 18px;
+  }
+  aside.right {
+    border-right: 0;
+    border-left: 1px solid var(--pencil);
+  }
+
+  main.canvas {
+    position: relative;
+    background: var(--paper-2);
+    overflow: hidden;
+  }
+
+  /* ---------- Sidebar typography ---------- */
+  h2 {
+    font-family: var(--serif);
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    margin: 0 0 6px;
+  }
+  .label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin: 18px 0 8px;
+    display: block;
+  }
+  .label:first-child { margin-top: 0; }
+  .hint {
+    font-size: 12px;
+    color: var(--ink-soft);
+    line-height: 1.55;
+    margin: 0 0 8px;
+  }
+  .hint code {
+    font-family: var(--mono);
+    background: var(--paper-2);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+    color: var(--ink);
+  }
+
+  /* ---------- Inputs ---------- */
+  textarea.code {
+    width: 100%;
+    min-height: 260px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.65;
+    padding: 12px 12px 12px 38px;
+    background: var(--paper-2);
+    color: var(--ink);
+    border: 1px solid var(--pencil);
+    border-radius: 4px;
+    resize: vertical;
+    outline: none;
+    tab-size: 2;
+  }
+  textarea.code:focus { border-color: var(--ink); }
+
+  .editor-wrap { position: relative; }
+  .gutter {
+    position: absolute;
+    left: 1px; top: 1px; bottom: 1px;
+    width: 30px;
+    background: var(--paper);
+    border-right: 1px solid var(--pencil);
+    border-radius: 4px 0 0 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--pencil);
+    padding: 12px 6px;
+    text-align: right;
+    pointer-events: none;
+    overflow: hidden;
+    line-height: 1.65;
+  }
+  .gutter .err { color: var(--bad); }
+  .gutter .num { display: block; }
+
+  .errors {
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--bad);
+    line-height: 1.5;
+    min-height: 14px;
+  }
+
+  /* ---------- Buttons ---------- */
+  button, .btn {
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink);
+    background: var(--paper);
+    border: 1px solid var(--pencil);
+    padding: 7px 12px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.12s ease;
+  }
+  button:hover { border-color: var(--ink); background: var(--paper-2); }
+  button.primary {
+    background: var(--ink); color: var(--paper); border-color: var(--ink);
+  }
+  button.primary:hover { background: var(--ink-soft); border-color: var(--ink-soft); }
+  button.accent {
+    background: var(--accent); color: var(--paper); border-color: var(--accent);
+  }
+  button.accent:hover { background: var(--accent-2); border-color: var(--accent-2); }
+  button.ghost { background: transparent; }
+  button.icon {
+    width: 32px; height: 32px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+
+  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  /* ---------- Toggle ---------- */
+  .seg {
+    display: inline-flex;
+    background: var(--paper-2);
+    border: 1px solid var(--pencil);
+    border-radius: 4px;
+    padding: 2px;
+  }
+  .seg button {
+    border: 0;
+    background: transparent;
+    padding: 5px 10px;
+    font-size: 11px;
+    font-family: var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-radius: 3px;
+  }
+  .seg button.on {
+    background: var(--ink); color: var(--paper);
+  }
+
+  .check {
+    display: flex; align-items: center; gap: 8px;
+    cursor: pointer; user-select: none;
+    font-size: 12px;
+    margin: 4px 0;
+  }
+  .check input { accent-color: var(--ink); }
+
+  /* ---------- Furniture grid ---------- */
+  .cat {
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer;
+    margin-top: 14px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--pencil);
+  }
+  .cat:first-of-type { margin-top: 4px; }
+  .cat-name {
+    font-family: var(--serif);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .cat-toggle {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-soft);
+  }
+  .furn-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    padding: 8px 0;
+  }
+  .furn-grid.collapsed { display: none; }
+  .furn-item {
+    border: 1px solid var(--pencil);
+    border-radius: 3px;
+    padding: 6px 8px;
+    cursor: pointer;
+    background: var(--paper);
+    transition: all 0.12s ease;
+    text-align: left;
+    font-family: var(--sans);
+  }
+  .furn-item:hover {
+    border-color: var(--ink);
+    background: var(--paper-2);
+    transform: translateY(-1px);
+  }
+  .furn-name {
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--ink);
+  }
+  .furn-dim {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--ink-soft);
+    margin-top: 2px;
+    letter-spacing: 0.04em;
+  }
+
+  /* ---------- Right panel ---------- */
+  .props .row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px dashed var(--pencil);
+    font-size: 12px;
+  }
+  .props .row:last-child { border-bottom: 0; }
+  .props .row .v {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink);
+  }
+  .props .row .k {
+    color: var(--ink-soft);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .empty {
+    font-style: italic;
+    color: var(--ink-soft);
+    font-size: 12px;
+    padding: 12px 0;
+    line-height: 1.6;
+  }
+  .num-input {
+    width: 78px;
+    background: var(--paper-2);
+    border: 1px solid var(--pencil);
+    padding: 4px 7px;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink);
+    text-align: right;
+  }
+  .num-input:focus { outline: none; border-color: var(--ink); }
+
+  /* ---------- Canvas / SVG ---------- */
+  svg.plan {
+    width: 100%;
+    height: 100%;
+    display: block;
+    user-select: none;
+    cursor: grab;
+  }
+  svg.plan.panning { cursor: grabbing; }
+  svg.plan.placing { cursor: crosshair; }
+
+  .wall { stroke: var(--ink); stroke-linecap: square; }
+  .wall-cap { fill: var(--ink); }
+  .vertex { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
+
+  .dim-line { stroke: var(--ink-soft); stroke-width: 0.5; opacity: 0.6; }
+  .dim-text {
+    font-family: var(--mono);
+    fill: var(--ink-soft);
+    text-anchor: middle;
+    dominant-baseline: middle;
+  }
+
+  .grid-line { stroke: var(--grid); stroke-width: 0.5; }
+  .grid-major { stroke: var(--pencil); stroke-width: 0.5; }
+  .grid-axis-label {
+    font-family: var(--mono);
+    fill: var(--pencil);
+    font-size: 10px;
+  }
+
+  .furn-rect {
+    fill: var(--paper);
+    stroke: var(--ink);
+    stroke-width: 1.2;
+    cursor: move;
+  }
+  .furn-rect.selected { stroke: var(--accent); stroke-width: 2; fill: rgba(184,85,43,0.08); }
+  .furn-icon { stroke: var(--ink-soft); stroke-width: 1; fill: none; pointer-events: none; }
+  .furn-icon.selected { stroke: var(--accent); }
+  .furn-label {
+    font-family: var(--mono);
+    fill: var(--ink-soft);
+    text-anchor: middle;
+    pointer-events: none;
+  }
+  .furn-label.selected { fill: var(--accent); }
+
+  .room-label {
+    font-family: var(--serif);
+    fill: var(--ink);
+    text-anchor: middle;
+    dominant-baseline: middle;
+    font-style: italic;
+    letter-spacing: 0.04em;
+    pointer-events: none;
+  }
+
+  .rotate-handle {
+    fill: var(--accent);
+    stroke: var(--paper);
+    stroke-width: 1.5;
+    cursor: grab;
+  }
+  .rotate-handle:active { cursor: grabbing; }
+
+  /* ---------- Floating overlay ---------- */
+  .toolbar {
+    position: absolute;
+    top: 14px; left: 14px;
+    display: flex; gap: 6px;
+    background: var(--paper);
+    padding: 6px;
+    border: 1px solid var(--pencil);
+    border-radius: 4px;
+    box-shadow: var(--shadow);
+  }
+  .toolbar-right {
+    position: absolute;
+    top: 14px; right: 14px;
+    display: flex; gap: 6px;
+    background: var(--paper);
+    padding: 6px;
+    border: 1px solid var(--pencil);
+    border-radius: 4px;
+    box-shadow: var(--shadow);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-soft);
+    align-items: center;
+    padding: 6px 10px;
+  }
+  .toolbar-right .scale-bar {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .toolbar-right .scale-line {
+    display: inline-block;
+    height: 8px;
+    border-left: 1px solid var(--ink);
+    border-right: 1px solid var(--ink);
+    border-bottom: 1px solid var(--ink);
+    width: 60px;
+    margin-bottom: -2px;
+  }
+
+  .placing-banner {
+    position: absolute;
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--ink);
+    color: var(--paper);
+    padding: 9px 16px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: var(--mono);
+    letter-spacing: 0.05em;
+    box-shadow: var(--shadow);
+    display: none;
+  }
+  .placing-banner.show { display: block; }
+
+  .corner-mark {
+    position: absolute;
+    bottom: 14px; right: 14px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-soft);
+    letter-spacing: 0.08em;
+  }
+
+  /* ---------- Scrollbar ---------- */
+  aside::-webkit-scrollbar { width: 10px; }
+  aside::-webkit-scrollbar-track { background: var(--paper); }
+  aside::-webkit-scrollbar-thumb {
+    background: var(--pencil);
+    border-radius: 5px;
+    border: 2px solid var(--paper);
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <h1>Drafting Table</h1>
+      <span class="sub">Floor Plan Editor · v0.1</span>
+    </div>
+    <div class="tools">
+      <div class="seg" id="unit-seg">
+        <button data-unit="ft" class="on">FEET</button>
+        <button data-unit="m">METERS</button>
+      </div>
+      <button id="export-btn" class="ghost" title="Save plan as JSON">Export</button>
+      <button id="import-btn" class="ghost" title="Load a saved plan">Import</button>
+      <button id="export-svg-btn" class="ghost" title="Export plan as SVG">SVG</button>
+      <input type="file" id="file-input" accept=".json" style="display:none">
+    </div>
+  </header>
+
+  <aside class="left">
+    <h2>Walls</h2>
+    <p class="hint">
+      Two ways to define walls — use whichever fits.
+    </p>
+    <p class="hint">
+      <strong>Turtle</strong>: <code>length direction</code> per line, each wall continues from the last.<br>
+      Directions: <code>up</code> <code>down</code> <code>left</code> <code>right</code>, or angle <code>10 @ 45</code>.<br>
+      <code>move 5 right</code> jumps without drawing.<br>
+      <code>goto 10,20</code> teleports cursor to absolute (x,y).
+    </p>
+    <p class="hint">
+      <strong>Coordinates</strong>: <code>wall x1,y1 to x2,y2</code> for any single wall.<br>
+      <code>rect x,y w x h</code> draws a rectangular room (4 walls).<br>
+      <code>label "Living Room" at x,y</code> places a room label.<br>
+      Lines starting with <code>#</code> are comments.
+    </p>
+    <div class="editor-wrap">
+      <div class="gutter" id="gutter"></div>
+      <textarea id="wall-input" class="code" spellcheck="false" autocomplete="off"></textarea>
+    </div>
+    <div class="errors" id="errors"></div>
+
+    <span class="label">Examples</span>
+    <div class="btn-row">
+      <button data-example="tollroad" class="primary">140 Toll Road</button>
+      <button data-example="rect">Rectangle</button>
+      <button data-example="lshape">L-Shape</button>
+      <button data-example="apartment">1-Bedroom</button>
+      <button data-example="clear">Clear</button>
+    </div>
+
+    <span class="label">Furniture Library</span>
+    <div id="furn-library"></div>
+  </aside>
+
+  <main class="canvas">
+    <div class="toolbar">
+      <button class="icon" id="zoom-fit-btn" title="Fit to view">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3"/>
+        </svg>
+      </button>
+      <button class="icon" id="zoom-in-btn" title="Zoom in">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="7" cy="7" r="4"/><path d="M10 10l3 3M5 7h4M7 5v4"/>
+        </svg>
+      </button>
+      <button class="icon" id="zoom-out-btn" title="Zoom out">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="7" cy="7" r="4"/><path d="M10 10l3 3M5 7h4"/>
+        </svg>
+      </button>
+      <button class="icon" id="grid-btn" title="Toggle grid">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
+          <path d="M2 2h12v12H2zM2 6h12M2 10h12M6 2v12M10 2v12"/>
+        </svg>
+      </button>
+      <button class="icon" id="dim-btn" title="Toggle wall dimensions">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
+          <path d="M2 11h12M3 9v4M13 9v4M5 6l3-3 3 3M8 3v8"/>
+        </svg>
+      </button>
+      <button class="icon" id="snap-btn" title="Snap furniture to grid">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 4h3v3H4zM9 4h3v3H9zM4 9h3v3H4zM9 9h3v3H9z"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="toolbar-right">
+      <div class="scale-bar">
+        <span class="scale-line" id="scale-line"></span>
+        <span id="scale-text">5 ft</span>
+      </div>
+    </div>
+
+    <svg class="plan" id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+
+    <div class="placing-banner" id="placing-banner">
+      Placing furniture — click on the plan, or press Esc to cancel
+    </div>
+    <div class="corner-mark">N ↑</div>
+  </main>
+
+  <aside class="right">
+    <h2>Properties</h2>
+    <div id="props"></div>
+
+    <span class="label">Plan info</span>
+    <div class="props" id="plan-info"></div>
+
+    <span class="label">Shortcuts</span>
+    <div class="hint" style="line-height:1.8">
+      <code>R</code> rotate 90°<br>
+      <code>Shift+R</code> rotate 15°<br>
+      <code>Del</code> delete selection<br>
+      <code>Esc</code> deselect / cancel<br>
+      <code>Drag</code> on plan to pan
+    </div>
+  </aside>
+</div>
+
+<script>
+/* ============================================================
+ * State
+ * ============================================================ */
+const state = {
+  unit: 'ft',                  // 'ft' or 'm'
+  walls: [],                   // {a:{x,y}, b:{x,y}, length, angleDeg, line}
+  labels: [],                  // {text, x, y, line}
+  furniture: [],               // {id, type, name, x, y, w, h, rotation}
+  selectedId: null,
+  showGrid: true,
+  showDimensions: false,
+  snapToGrid: false,
+  gridSize: 1,                 // ft
+  wallThickness: 0.5,          // ft (~6 inches)
+  zoom: 1,                     // multiplier; 1 = fit
+  pan: { x: 0, y: 0 },
+  placing: null,               // furniture type if placing, else null
+  drag: null,                  // current drag state
+};
+
+/* ============================================================
+ * Furniture catalog (real-world, in feet)
+ * Categories grouped to match a typical home
+ * ============================================================ */
+const CATALOG = [
+  { cat: 'Bedroom', items: [
+    { type: 'bed-twin',   name: 'Twin Bed',     w: 3.25, h: 6.25, icon: 'bed' },
+    { type: 'bed-full',   name: 'Full Bed',     w: 4.5,  h: 6.25, icon: 'bed' },
+    { type: 'bed-queen',  name: 'Queen Bed',    w: 5,    h: 6.67, icon: 'bed' },
+    { type: 'bed-king',   name: 'King Bed',     w: 6.33, h: 6.67, icon: 'bed' },
+    { type: 'nightstand', name: 'Nightstand',   w: 2,    h: 1.5,  icon: 'box' },
+    { type: 'dresser',    name: 'Dresser',      w: 5,    h: 1.67, icon: 'box' },
+    { type: 'wardrobe',   name: 'Wardrobe',     w: 4,    h: 2,    icon: 'box' },
+  ]},
+  { cat: 'Living', items: [
+    { type: 'sofa-3',     name: 'Sofa (3-seat)', w: 7,   h: 3,    icon: 'sofa' },
+    { type: 'sofa-2',     name: 'Loveseat',     w: 5,    h: 3,    icon: 'sofa' },
+    { type: 'armchair',   name: 'Armchair',     w: 3,    h: 3,    icon: 'sofa' },
+    { type: 'coffee',     name: 'Coffee Table', w: 4,    h: 2,    icon: 'box' },
+    { type: 'tv',         name: 'TV Stand',     w: 5,    h: 1.5,  icon: 'tv' },
+    { type: 'bookshelf',  name: 'Bookshelf',    w: 3,    h: 1,    icon: 'box' },
+  ]},
+  { cat: 'Dining', items: [
+    { type: 'table-4',    name: 'Table (4)',    w: 4,    h: 3,    icon: 'table' },
+    { type: 'table-6',    name: 'Table (6)',    w: 6,    h: 3,    icon: 'table' },
+    { type: 'table-8',    name: 'Table (8)',    w: 7,    h: 3.5,  icon: 'table' },
+    { type: 'chair',      name: 'Chair',        w: 1.5,  h: 1.5,  icon: 'chair' },
+  ]},
+  { cat: 'Kitchen', items: [
+    { type: 'fridge',     name: 'Refrigerator', w: 3,    h: 2.5,  icon: 'box' },
+    { type: 'stove',      name: 'Stove',        w: 2.5,  h: 2.5,  icon: 'stove' },
+    { type: 'sink-k',     name: 'Sink',         w: 2.5,  h: 2,    icon: 'sink' },
+    { type: 'counter',    name: 'Counter',      w: 4,    h: 2,    icon: 'box' },
+    { type: 'island',     name: 'Island',       w: 6,    h: 3,    icon: 'box' },
+  ]},
+  { cat: 'Bathroom', items: [
+    { type: 'toilet',     name: 'Toilet',       w: 1.67, h: 2.5,  icon: 'toilet' },
+    { type: 'sink-b',     name: 'Vanity',       w: 2,    h: 1.5,  icon: 'sink' },
+    { type: 'bathtub',    name: 'Bathtub',      w: 5,    h: 2.5,  icon: 'tub' },
+    { type: 'shower',     name: 'Shower',       w: 3,    h: 3,    icon: 'shower' },
+  ]},
+  { cat: 'Office', items: [
+    { type: 'desk',       name: 'Desk',         w: 5,    h: 2.5,  icon: 'box' },
+    { type: 'office-chair', name: 'Office Chair', w: 2,  h: 2,    icon: 'chair' },
+  ]},
+  { cat: 'Doors & Windows', items: [
+    { type: 'door',       name: 'Door',         w: 3,    h: 0.3,  icon: 'door' },
+    { type: 'window',     name: 'Window',       w: 4,    h: 0.3,  icon: 'window' },
+  ]},
+];
+
+const CATALOG_INDEX = {};
+CATALOG.forEach(g => g.items.forEach(it => CATALOG_INDEX[it.type] = it));
+
+/* ============================================================
+ * Examples
+ * ============================================================ */
+// Examples: each value is either a string (walls only) or
+// { walls: string, furniture: [{type, x, y, rotation}] }
+const EXAMPLES = {
+  rect: `# Simple 20x15 rectangular room
+20 right
+15 up
+20 left
+15 down`,
+  lshape: `# L-shaped living space
+25 right
+12 up
+10 left
+8 up
+15 left
+20 down`,
+  apartment: `# 1-bedroom apartment (30' x 22')
+30 right
+22 up
+30 left
+22 down
+# Bedroom partition (vertical)
+move 18 right
+12 up
+# Bedroom partition (horizontal, top of bedroom)
+12 right
+# Bathroom partition wall
+move 8 left
+10 up`,
+  clear: ``,
+  tollroad: {
+    walls: `# === 140 TOLL ROAD — Lower Floor ===
+# Approximated from the architect's drawings.
+# Origin (0,0) at NW corner of the workshop.
+# +x = east, +y = south, units = feet.
+# Refine dimensions as you measure off the original plans.
+
+# --- North wing: workshop & garage ---
+rect 0,0 23x12.5             # Workshop
+rect 0,12.5 31x15.5          # Garage
+rect 31,12.5 8x7             # Utility
+rect 31,19.5 8x8.5           # Laundry / Storage
+rect 31,28 8x8               # Mudroom
+
+# --- North-center: storage strip, media, kids ---
+rect 39,12.5 16x6            # Storage / IT
+rect 39,18.5 16x14.5         # Media Room
+rect 55,18.5 23x14.5         # Kids Room
+
+# --- Foyer & entry ---
+rect 78,0 22x33              # Foyer / Entry corridor
+rect 88,28 11x13             # Pantry passage
+
+# --- North-east: pool wing ---
+rect 100,0 22x20             # Endless Pool enclosure
+rect 100,20 22x8             # Pool Patio
+rect 122,18 15x7             # Mech
+rect 122,25 15x8             # Pool Bath
+rect 99,33 23x8              # Gym
+rect 122,33 15x8             # Sauna
+
+# --- Center: bedrooms 4 & 5, bath 3 ---
+rect 39,33 16x8              # Bedroom 5
+rect 55,33 23x8              # Bedroom 4
+rect 78,33 10x8              # Bath 3
+
+# --- ADU (south-west) ---
+rect 0,41 23x12              # ADU Garage
+rect 23,41 16x12             # ADU Kitchen
+rect 23,53 16x13             # ADU Living
+rect 0,53 23x24              # ADU Bedroom + Walk-in
+rect 23,66 16x11             # ADU Bath
+
+# --- South wing: rear patio, dining, kitchen, living ---
+rect 39,41 28x25             # Rear Patio (open)
+rect 67,53 21x24             # Dining Room
+rect 88,41 24x12             # Kitchen / Island
+rect 88,53 24x24             # Living Room
+
+# --- East wing: hallway, master bath, offices, bedrooms ---
+rect 112,41 38x12            # Hallway 1 + Master Bath strip
+rect 112,53 14x14            # Office 2
+rect 126,53 12x14            # Office 1
+rect 138,41 12x12            # Bedroom 3
+rect 138,53 12x14            # Bedroom 2
+rect 150,41 35x12            # Master Bath / Walk-in
+rect 150,53 35x24            # Master Bedroom
+rect 185,53 9x24             # Master Enclosed Patio
+
+# --- Room labels ---
+label "Workshop" at 11.5,6
+label "Garage" at 15,21
+label "Utility" at 35,16
+label "Laundry" at 35,24
+label "Mudroom" at 35,32
+label "Storage" at 47,15.5
+label "Media Room" at 47,26
+label "Kids Room" at 67,26
+label "Foyer" at 89,16
+
+label "Endless Pool" at 111,10
+label "Pool Patio" at 111,24
+label "Mech" at 130,21.5
+label "Pool Bath" at 130,29
+label "Gym" at 110,37
+label "Sauna" at 130,37
+
+label "Bedroom 5" at 47,37
+label "Bedroom 4" at 67,37
+label "Bath 3" at 83,37
+label "Pantry" at 93.5,34.5
+
+label "ADU Garage" at 11.5,47
+label "ADU Kitchen" at 31,47
+label "ADU Living" at 31,59
+label "ADU Bedroom" at 11.5,65
+label "ADU Bath" at 31,71.5
+
+label "Rear Patio" at 53,53
+label "Dining Room" at 77.5,65
+label "Kitchen" at 100,47
+label "Living Room" at 100,65
+
+label "Hallway 1" at 122,47
+label "Master Bath" at 142,47
+label "Office 2" at 119,60
+label "Office 1" at 132,60
+label "Bedroom 3" at 144,47
+label "Bedroom 2" at 144,60
+label "Master Bedroom" at 167,65
+label "Master Patio" at 189,65`,
+    furniture: [
+      // Master suite
+      { type: 'bed-king',   x: 167, y: 70, rotation: 0 },
+      { type: 'nightstand', x: 158, y: 70, rotation: 0 },
+      { type: 'nightstand', x: 176, y: 70, rotation: 0 },
+      { type: 'dresser',    x: 168, y: 56, rotation: 180 },
+      // Master bath
+      { type: 'bathtub',    x: 130, y: 47, rotation: 0 },
+      { type: 'toilet',     x: 138, y: 47, rotation: 90 },
+      { type: 'shower',     x: 145, y: 47, rotation: 0 },
+      { type: 'sink-b',     x: 122, y: 43, rotation: 180 },
+      // Bedrooms 2/3
+      { type: 'bed-queen',  x: 144, y: 60, rotation: 0 },
+      { type: 'bed-queen',  x: 144, y: 47, rotation: 0 },
+      // Offices
+      { type: 'desk',       x: 119, y: 56, rotation: 0 },
+      { type: 'office-chair', x: 119, y: 59, rotation: 0 },
+      { type: 'desk',       x: 132, y: 56, rotation: 0 },
+      { type: 'office-chair', x: 132, y: 59, rotation: 0 },
+      // Center bedrooms
+      { type: 'bed-queen',  x: 47, y: 38, rotation: 0 },
+      { type: 'bed-queen',  x: 67, y: 38, rotation: 0 },
+      // Bath 3
+      { type: 'bathtub',    x: 84, y: 35, rotation: 90 },
+      { type: 'toilet',     x: 80, y: 39, rotation: 0 },
+      // Living Room
+      { type: 'sofa-3',     x: 100, y: 60, rotation: 0 },
+      { type: 'sofa-2',     x: 95, y: 70, rotation: 90 },
+      { type: 'armchair',   x: 105, y: 70, rotation: 270 },
+      { type: 'coffee',     x: 100, y: 65, rotation: 0 },
+      { type: 'tv',         x: 100, y: 76, rotation: 180 },
+      // Kitchen / Island
+      { type: 'island',     x: 100, y: 47, rotation: 0 },
+      { type: 'fridge',     x: 91, y: 42.5, rotation: 180 },
+      { type: 'stove',      x: 100, y: 42.5, rotation: 180 },
+      { type: 'sink-k',     x: 108, y: 42.5, rotation: 180 },
+      // Dining
+      { type: 'table-8',    x: 77.5, y: 65, rotation: 0 },
+      { type: 'chair',      x: 73, y: 60, rotation: 0 },
+      { type: 'chair',      x: 77.5, y: 60, rotation: 0 },
+      { type: 'chair',      x: 82, y: 60, rotation: 0 },
+      { type: 'chair',      x: 73, y: 70, rotation: 180 },
+      { type: 'chair',      x: 77.5, y: 70, rotation: 180 },
+      { type: 'chair',      x: 82, y: 70, rotation: 180 },
+      // ADU bedroom & living
+      { type: 'bed-king',   x: 11.5, y: 70, rotation: 0 },
+      { type: 'sofa-2',     x: 31, y: 60, rotation: 0 },
+      { type: 'tv',         x: 31, y: 54, rotation: 0 },
+      // ADU kitchen
+      { type: 'fridge',     x: 25, y: 42.5, rotation: 180 },
+      { type: 'stove',      x: 31, y: 42.5, rotation: 180 },
+      { type: 'sink-k',     x: 37, y: 42.5, rotation: 180 },
+    ],
+  },
+};
+
+function loadExample(key) {
+  const ex = EXAMPLES[key];
+  const ta = document.getElementById('wall-input');
+  // Normalize: a string is just walls; an object has walls + furniture
+  const walls = (typeof ex === 'string') ? ex : (ex && ex.walls) || '';
+  const furn  = (typeof ex === 'object' && ex && Array.isArray(ex.furniture)) ? ex.furniture : [];
+  ta.value = walls;
+  // Hydrate furniture: catalog supplies w/h/icon/name; example only specifies type/x/y/rotation
+  state.furniture = furn.map(f => {
+    const t = CATALOG_INDEX[f.type];
+    if (!t) return null;
+    return {
+      id: nextId(),
+      type: f.type,
+      name: t.name,
+      icon: t.icon,
+      w: f.w ?? t.w,
+      h: f.h ?? t.h,
+      x: f.x,
+      y: f.y,
+      rotation: f.rotation || 0,
+    };
+  }).filter(Boolean);
+  state.selectedId = null;
+  state.zoom = 1;
+  state.pan = { x: 0, y: 0 };
+  rebuildFromInput();
+  updateProperties();
+}
+
+/* ============================================================
+ * Wall parser
+ * Turtle-style: a starting cursor walks each line.
+ * ============================================================ */
+const DIRS = {
+  right: 0, r: 0, east: 0,  e: 0,
+  up:   90, u: 90, north: 90, n: 90,
+  left:180, l:180, west: 180, w: 180,
+  down:270, d:270, south: 270, s: 270,
+};
+
+function parseLength(token, unit) {
+  // Always returns the value in feet (canonical internal unit).
+  // Suffixes override the current display unit.
+  let s = token.trim().toLowerCase();
+  let n;
+  if (s.endsWith('ft') || s.endsWith("'")) {
+    n = parseFloat(s.replace(/ft$|'$/, ''));
+    if (isNaN(n)) return null;
+    return n;                      // already feet
+  } else if (s.endsWith('cm')) {
+    n = parseFloat(s.slice(0, -2));
+    if (isNaN(n)) return null;
+    return n * 0.0328084;          // cm → ft
+  } else if (s.endsWith('m')) {
+    n = parseFloat(s.slice(0, -1));
+    if (isNaN(n)) return null;
+    return n * 3.28084;            // m → ft
+  }
+  n = parseFloat(s);
+  if (isNaN(n)) return null;
+  return unit === 'm' ? n * 3.28084 : n;
+}
+
+function parseCoord(token, unit) {
+  // Convert a coordinate value (always relative to feet internally).
+  // Bare numbers are interpreted in current unit.
+  const n = parseFloat(token);
+  if (isNaN(n)) return null;
+  return unit === 'm' ? n * 3.28084 : n;
+}
+
+function stripInlineComment(s) {
+  // Strip a trailing "  # comment" while leaving # inside double-quoted strings alone.
+  let inQ = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '"') inQ = !inQ;
+    else if (c === '#' && !inQ && i > 0 && /\s/.test(s[i - 1])) {
+      return s.slice(0, i).replace(/\s+$/, '');
+    }
+  }
+  return s;
+}
+
+function parseLine(line) {
+  // Returns {kind, ...} or {error}
+  let trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith('#')) return { kind: 'noop' };
+  trimmed = stripInlineComment(trimmed).trim();
+  if (!trimmed) return { kind: 'noop' };
+
+  // goto x,y  — jump cursor without drawing
+  let m = trimmed.match(/^goto\s+(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/i);
+  if (m) {
+    return { kind: 'goto',
+             x: parseCoord(m[1], state.unit),
+             y: parseCoord(m[2], state.unit) };
+  }
+
+  // wall x1,y1 to x2,y2  — absolute-coordinate wall
+  m = trimmed.match(/^wall\s+(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s+(?:to\s+)?(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/i);
+  if (m) {
+    return { kind: 'wallCoord',
+             x1: parseCoord(m[1], state.unit), y1: parseCoord(m[2], state.unit),
+             x2: parseCoord(m[3], state.unit), y2: parseCoord(m[4], state.unit) };
+  }
+
+  // rect x,y w x h  — quick rectangular room
+  m = trimmed.match(/^rect\s+(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)$/i);
+  if (m) {
+    return { kind: 'rect',
+             x: parseCoord(m[1], state.unit), y: parseCoord(m[2], state.unit),
+             w: parseCoord(m[3], state.unit), h: parseCoord(m[4], state.unit) };
+  }
+
+  // label "text" at x,y  — room/area label
+  m = trimmed.match(/^label\s+"([^"]*)"\s+(?:at\s+)?(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/i);
+  if (m) {
+    return { kind: 'label', text: m[1],
+             x: parseCoord(m[2], state.unit), y: parseCoord(m[3], state.unit) };
+  }
+
+  // Turtle commands: optional "move" prefix, then "length direction" or "length @ angle"
+  let kind = 'wall';
+  let rest = trimmed;
+  if (/^move\s+/i.test(rest)) {
+    kind = 'move';
+    rest = rest.replace(/^move\s+/i, '');
+  }
+  const atMatch = rest.match(/^(\S+)\s*@\s*(-?\d+(?:\.\d+)?)$/);
+  if (atMatch) {
+    const len = parseLength(atMatch[1], state.unit);
+    const ang = parseFloat(atMatch[2]);
+    if (len === null) return { error: `bad length "${atMatch[1]}"` };
+    return { kind, length: len, angleDeg: ang };
+  }
+  const parts = rest.split(/\s+/);
+  if (parts.length < 2) return { error: `expected "length direction" or coordinate command` };
+  const len = parseLength(parts[0], state.unit);
+  if (len === null) return { error: `bad length "${parts[0]}"` };
+  const dir = parts.slice(1).join(' ').toLowerCase();
+  if (!(dir in DIRS)) return { error: `unknown direction "${dir}"` };
+  return { kind, length: len, angleDeg: DIRS[dir] };
+}
+
+function buildWalls(text) {
+  const lines = text.split('\n');
+  const walls = [];
+  const labels = [];
+  const errs = [];
+  let cursor = { x: 0, y: 0 };
+  // Coordinate-syntax convention: user types "+y down" (natural for floor plans)
+  // Internal storage is also "+y down" (matches screen). So coords pass through directly.
+  // Turtle "up" still decreases y on screen (= going north on plan).
+  lines.forEach((line, idx) => {
+    const p = parseLine(line);
+    if (p.error) {
+      errs.push({ line: idx + 1, msg: p.error });
+      return;
+    }
+    if (p.kind === 'noop') return;
+    if (p.kind === 'goto') {
+      cursor = { x: p.x, y: p.y };
+      return;
+    }
+    if (p.kind === 'label') {
+      labels.push({ text: p.text, x: p.x, y: p.y, line: idx + 1 });
+      return;
+    }
+    if (p.kind === 'wallCoord') {
+      const a = { x: p.x1, y: p.y1 };
+      const b = { x: p.x2, y: p.y2 };
+      const dx = b.x - a.x, dy = b.y - a.y;
+      walls.push({
+        a, b,
+        length: Math.hypot(dx, dy),
+        angleDeg: Math.atan2(-dy, dx) * 180 / Math.PI,
+        line: idx + 1,
+      });
+      cursor = b;
+      return;
+    }
+    if (p.kind === 'rect') {
+      // Four walls of a rectangle, clockwise from top-left
+      const x1 = p.x, y1 = p.y, x2 = p.x + p.w, y2 = p.y + p.h;
+      const corners = [[x1,y1],[x2,y1],[x2,y2],[x1,y2],[x1,y1]];
+      for (let i = 0; i < 4; i++) {
+        const a = { x: corners[i][0], y: corners[i][1] };
+        const b = { x: corners[i+1][0], y: corners[i+1][1] };
+        const dx = b.x - a.x, dy = b.y - a.y;
+        walls.push({
+          a, b,
+          length: Math.hypot(dx, dy),
+          angleDeg: Math.atan2(-dy, dx) * 180 / Math.PI,
+          line: idx + 1,
+        });
+      }
+      return;
+    }
+    // Turtle wall or move
+    const rad = (p.angleDeg * Math.PI) / 180;
+    const dx = Math.cos(rad) * p.length;
+    const dy = -Math.sin(rad) * p.length;
+    const next = { x: cursor.x + dx, y: cursor.y + dy };
+    if (p.kind === 'wall') {
+      walls.push({
+        a: { ...cursor },
+        b: { ...next },
+        length: p.length,
+        angleDeg: p.angleDeg,
+        line: idx + 1,
+      });
+    }
+    cursor = next;
+  });
+  return { walls, labels, errs };
+}
+
+/* ============================================================
+ * Geometry helpers
+ * ============================================================ */
+function computeBBox() {
+  let xs = [], ys = [];
+  state.walls.forEach(w => {
+    xs.push(w.a.x, w.b.x);
+    ys.push(w.a.y, w.b.y);
+  });
+  state.labels.forEach(l => {
+    xs.push(l.x); ys.push(l.y);
+  });
+  state.furniture.forEach(f => {
+    // Use rotated bounding box for safety
+    const cs = Math.abs(Math.cos(f.rotation * Math.PI / 180));
+    const sn = Math.abs(Math.sin(f.rotation * Math.PI / 180));
+    const halfW = (f.w * cs + f.h * sn) / 2;
+    const halfH = (f.w * sn + f.h * cs) / 2;
+    xs.push(f.x - halfW, f.x + halfW);
+    ys.push(f.y - halfH, f.y + halfH);
+  });
+  if (xs.length === 0) return { x: -10, y: -10, w: 20, h: 20 };
+  const xMin = Math.min(...xs), xMax = Math.max(...xs);
+  const yMin = Math.min(...ys), yMax = Math.max(...ys);
+  const pad = Math.max(2, Math.max(xMax - xMin, yMax - yMin) * 0.1);
+  return {
+    x: xMin - pad,
+    y: yMin - pad,
+    w: (xMax - xMin) + 2 * pad,
+    h: (yMax - yMin) + 2 * pad,
+  };
+}
+
+function getViewBox() {
+  const box = computeBBox();
+  const svg = document.getElementById('svg');
+  const cw = svg.clientWidth, ch = svg.clientHeight;
+  // Fit box into svg, applying zoom and pan
+  const aspect = cw / ch;
+  let w = box.w, h = box.h;
+  if (w / h > aspect) h = w / aspect; else w = h * aspect;
+  w /= state.zoom; h /= state.zoom;
+  const cx = box.x + box.w / 2 + state.pan.x;
+  const cy = box.y + box.h / 2 + state.pan.y;
+  return { x: cx - w / 2, y: cy - h / 2, w, h };
+}
+
+function svgToWorld(evt) {
+  const svg = document.getElementById('svg');
+  const pt = svg.createSVGPoint();
+  pt.x = evt.clientX; pt.y = evt.clientY;
+  const ctm = svg.getScreenCTM().inverse();
+  const w = pt.matrixTransform(ctm);
+  return { x: w.x, y: w.y };
+}
+
+/* ============================================================
+ * Rendering
+ * ============================================================ */
+function fmt(n) {
+  // n is internally in feet; format for the current display unit.
+  if (state.unit === 'm') {
+    const m = n * 0.3048;
+    const dec = Math.abs(m) < 10 ? 2 : 1;
+    return m.toFixed(dec).replace(/\.?0+$/, '') + 'm';
+  }
+  const dec = Math.abs(n) < 10 ? 1 : 0;
+  return n.toFixed(dec).replace(/\.0$/, '') + "'";
+}
+
+function render() {
+  const svg = document.getElementById('svg');
+  const vb = getViewBox();
+  svg.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+  // unit per pixel = vb.w / svg.clientWidth
+  const unitPerPx = vb.w / svg.clientWidth;
+
+  let parts = [];
+
+  // ---- Grid ----
+  if (state.showGrid) {
+    const minor = state.gridSize;
+    const major = minor * 5;
+    const x0 = Math.floor(vb.x / minor) * minor;
+    const y0 = Math.floor(vb.y / minor) * minor;
+    const x1 = vb.x + vb.w, y1 = vb.y + vb.h;
+    let g = `<g class="grid">`;
+    for (let x = x0; x <= x1; x += minor) {
+      const cls = (Math.abs(x % major) < 1e-6) ? 'grid-major' : 'grid-line';
+      const sw = (cls === 'grid-major' ? 0.7 : 0.4) * unitPerPx;
+      g += `<line class="${cls}" x1="${x}" y1="${vb.y}" x2="${x}" y2="${y1}" stroke-width="${sw}"/>`;
+    }
+    for (let y = y0; y <= y1; y += minor) {
+      const cls = (Math.abs(y % major) < 1e-6) ? 'grid-major' : 'grid-line';
+      const sw = (cls === 'grid-major' ? 0.7 : 0.4) * unitPerPx;
+      g += `<line class="${cls}" x1="${vb.x}" y1="${y}" x2="${x1}" y2="${y}" stroke-width="${sw}"/>`;
+    }
+    g += `</g>`;
+    parts.push(g);
+  }
+
+  // ---- Furniture (under walls so walls visually contain) ----
+  parts.push(renderFurniture(unitPerPx));
+
+  // ---- Walls ----
+  parts.push(renderWalls(unitPerPx));
+
+  // ---- Labels (on top of walls) ----
+  parts.push(renderLabels(unitPerPx));
+
+  // ---- Origin marker ----
+  parts.push(`
+    <g opacity="0.4">
+      <circle cx="0" cy="0" r="${unitPerPx*3}" fill="none" stroke="#1a2b47" stroke-width="${unitPerPx*0.5}"/>
+      <line x1="${-unitPerPx*5}" y1="0" x2="${unitPerPx*5}" y2="0" stroke="#1a2b47" stroke-width="${unitPerPx*0.5}"/>
+      <line x1="0" y1="${-unitPerPx*5}" x2="0" y2="${unitPerPx*5}" stroke="#1a2b47" stroke-width="${unitPerPx*0.5}"/>
+    </g>
+  `);
+
+  svg.innerHTML = parts.join('\n');
+
+  // Re-attach event handlers via delegation (handled at SVG level)
+  updateScaleBar(unitPerPx);
+  updatePlanInfo();
+}
+
+function renderLabels(unitPerPx) {
+  if (state.labels.length === 0) return '';
+  const fontSize = unitPerPx * 14;
+  return `<g class="labels">${
+    state.labels.map(l =>
+      `<text class="room-label" x="${l.x}" y="${l.y}" font-size="${fontSize}">${
+        l.text.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'})[c])
+      }</text>`
+    ).join('')
+  }</g>`;
+}
+
+function renderWalls(unitPerPx) {
+  if (state.walls.length === 0) return '';
+  const t = state.wallThickness;
+  let out = `<g class="walls">`;
+  // Render the wall strokes
+  state.walls.forEach(w => {
+    out += `<line class="wall" x1="${w.a.x}" y1="${w.a.y}" x2="${w.b.x}" y2="${w.b.y}" stroke-width="${t}"/>`;
+  });
+  // Optionally render dimension labels — deduped, so overlapping walls
+  // (e.g. shared edges of adjacent rooms) don't stack labels.
+  if (state.showDimensions) {
+    const seen = new Set();
+    const fontSize = unitPerPx * 11;
+    const off = unitPerPx * 14;
+    state.walls.forEach(w => {
+      // Round to 0.01 ft for dedup; treat both endpoint orderings as the same wall
+      const round = n => Math.round(n * 100) / 100;
+      const ax = round(w.a.x), ay = round(w.a.y), bx = round(w.b.x), by = round(w.b.y);
+      const k1 = `${ax},${ay}|${bx},${by}`;
+      const k2 = `${bx},${by}|${ax},${ay}`;
+      if (seen.has(k1) || seen.has(k2)) return;
+      seen.add(k1);
+      const mx = (w.a.x + w.b.x) / 2;
+      const my = (w.a.y + w.b.y) / 2;
+      const rad = w.angleDeg * Math.PI / 180;
+      const ox = Math.sin(rad) * off;
+      const oy = Math.cos(rad) * off;
+      const tx = mx + ox, ty = my + oy;
+      out += `<text class="dim-text" x="${tx}" y="${ty}" font-size="${fontSize}">${fmt(w.length)}</text>`;
+    });
+  }
+  // Vertices
+  const vSeen = new Set();
+  state.walls.forEach(w => {
+    [w.a, w.b].forEach(p => {
+      const k = `${p.x.toFixed(3)},${p.y.toFixed(3)}`;
+      if (vSeen.has(k)) return;
+      vSeen.add(k);
+      out += `<circle class="vertex" cx="${p.x}" cy="${p.y}" r="${t * 0.7}" stroke-width="${unitPerPx*0.8}"/>`;
+    });
+  });
+  out += `</g>`;
+  return out;
+}
+
+function renderFurniture(unitPerPx) {
+  let out = `<g class="furniture-layer">`;
+  state.furniture.forEach(f => {
+    const sel = (f.id === state.selectedId);
+    const cls = sel ? 'selected' : '';
+    const transform = `translate(${f.x},${f.y}) rotate(${f.rotation})`;
+    const x = -f.w / 2, y = -f.h / 2;
+    const labelSize = Math.min(unitPerPx * 10, Math.min(f.w, f.h) * 0.4);
+    out += `<g transform="${transform}" data-furn-id="${f.id}" style="cursor: move;">`;
+    out += `<rect class="furn-rect ${cls}" x="${x}" y="${y}" width="${f.w}" height="${f.h}" rx="0.05"/>`;
+    out += renderFurnitureIcon(f, sel);
+    if (Math.min(f.w, f.h) > 1.4) {
+      out += `<text class="furn-label ${cls}" x="0" y="${f.h/2 - 0.2}" font-size="${labelSize}">${f.name}</text>`;
+    }
+    if (sel) {
+      // Rotate handle above the bounding box
+      const handleY = -f.h / 2 - 0.7;
+      out += `<line x1="0" y1="${-f.h/2}" x2="0" y2="${handleY}" stroke="${'#b8552b'}" stroke-width="${unitPerPx*0.6}"/>`;
+      out += `<circle class="rotate-handle" data-rotate-id="${f.id}" cx="0" cy="${handleY}" r="${Math.max(0.25, unitPerPx*5)}"/>`;
+    }
+    out += `</g>`;
+  });
+  out += `</g>`;
+  return out;
+}
+
+function renderFurnitureIcon(f, sel) {
+  const cls = sel ? 'selected' : '';
+  const sw = 0.05;
+  const w = f.w, h = f.h;
+  const hw = w/2, hh = h/2;
+  switch (f.icon || (CATALOG_INDEX[f.type] && CATALOG_INDEX[f.type].icon)) {
+    case 'bed': {
+      // pillow strip at top, blanket fold in middle
+      const pillow = h * 0.18;
+      return `
+        <line class="furn-icon ${cls}" x1="${-hw}" y1="${-hh+pillow}" x2="${hw}" y2="${-hh+pillow}" stroke-width="${sw}"/>
+        <line class="furn-icon ${cls}" x1="${-hw}" y1="${-hh+pillow*0.5}" x2="${-hw*0.95}" y2="${-hh+pillow*0.5}" stroke-width="${sw}"/>
+        <rect class="furn-icon ${cls}" x="${-hw*0.85}" y="${-hh+0.1}" width="${hw*0.6}" height="${pillow*0.7}" stroke-width="${sw}"/>
+        <rect class="furn-icon ${cls}" x="${hw*0.25}" y="${-hh+0.1}" width="${hw*0.6}" height="${pillow*0.7}" stroke-width="${sw}"/>`;
+    }
+    case 'sofa': {
+      const pad = 0.25;
+      return `
+        <rect class="furn-icon ${cls}" x="${-hw+pad}" y="${-hh+pad}" width="${w-2*pad}" height="${h*0.4}" stroke-width="${sw}"/>
+        <rect class="furn-icon ${cls}" x="${-hw+pad}" y="${-hh+h*0.5}" width="${w-2*pad}" height="${h*0.4}" stroke-width="${sw}"/>`;
+    }
+    case 'table': {
+      const inset = 0.2;
+      return `<rect class="furn-icon ${cls}" x="${-hw+inset}" y="${-hh+inset}" width="${w-2*inset}" height="${h-2*inset}" stroke-width="${sw}"/>`;
+    }
+    case 'chair': {
+      const back = 0.15;
+      return `<line class="furn-icon ${cls}" x1="${-hw}" y1="${-hh+back}" x2="${hw}" y2="${-hh+back}" stroke-width="${sw}"/>`;
+    }
+    case 'tv': {
+      return `<line class="furn-icon ${cls}" x1="${-hw*0.8}" y1="${-hh*0.3}" x2="${hw*0.8}" y2="${-hh*0.3}" stroke-width="${sw*1.5}"/>`;
+    }
+    case 'stove': {
+      // 4 burners
+      const r = Math.min(w,h) * 0.15;
+      return `
+        <circle class="furn-icon ${cls}" cx="${-w*0.22}" cy="${-h*0.22}" r="${r}" stroke-width="${sw}"/>
+        <circle class="furn-icon ${cls}" cx="${ w*0.22}" cy="${-h*0.22}" r="${r}" stroke-width="${sw}"/>
+        <circle class="furn-icon ${cls}" cx="${-w*0.22}" cy="${ h*0.22}" r="${r}" stroke-width="${sw}"/>
+        <circle class="furn-icon ${cls}" cx="${ w*0.22}" cy="${ h*0.22}" r="${r}" stroke-width="${sw}"/>`;
+    }
+    case 'sink': {
+      return `<rect class="furn-icon ${cls}" x="${-hw*0.7}" y="${-hh*0.65}" width="${hw*1.4}" height="${hh*1.3}" stroke-width="${sw}" rx="0.1"/>`;
+    }
+    case 'tub': {
+      return `<rect class="furn-icon ${cls}" x="${-hw+0.3}" y="${-hh+0.3}" width="${w-0.6}" height="${h-0.6}" stroke-width="${sw}" rx="0.5"/>`;
+    }
+    case 'shower': {
+      return `
+        <rect class="furn-icon ${cls}" x="${-hw+0.15}" y="${-hh+0.15}" width="${w-0.3}" height="${h-0.3}" stroke-width="${sw}"/>
+        <line class="furn-icon ${cls}" x1="${-hw+0.15}" y1="${-hh+0.15}" x2="${hw-0.15}" y2="${hh-0.15}" stroke-width="${sw}"/>
+        <line class="furn-icon ${cls}" x1="${-hw+0.15}" y1="${hh-0.15}" x2="${hw-0.15}" y2="${-hh+0.15}" stroke-width="${sw}"/>`;
+    }
+    case 'toilet': {
+      // bowl and tank
+      return `
+        <ellipse class="furn-icon ${cls}" cx="0" cy="${hh*0.15}" rx="${hw*0.65}" ry="${hh*0.45}" stroke-width="${sw}"/>
+        <rect class="furn-icon ${cls}" x="${-hw*0.7}" y="${-hh+0.15}" width="${hw*1.4}" height="${h*0.3}" stroke-width="${sw}"/>`;
+    }
+    case 'door': {
+      // arc swing
+      const r = Math.max(w, 0.2);
+      return `<path class="furn-icon ${cls}" d="M ${-hw} ${hh} A ${r} ${r} 0 0 1 ${hw} ${hh}" stroke-width="${sw*1.5}"/>
+              <line class="furn-icon ${cls}" x1="${-hw}" y1="${hh}" x2="${-hw}" y2="${hh - r}" stroke-width="${sw*1.5}"/>`;
+    }
+    case 'window': {
+      return `<line class="furn-icon ${cls}" x1="${-hw}" y1="0" x2="${hw}" y2="0" stroke-width="${sw*1.5}"/>`;
+    }
+    case 'box':
+    default: {
+      // diagonal slash to suggest object
+      return `<line class="furn-icon ${cls}" x1="${-hw}" y1="${-hh}" x2="${hw}" y2="${hh}" stroke-width="${sw}" opacity="0.3"/>`;
+    }
+  }
+}
+
+function updateScaleBar(unitPerPx) {
+  // Pick a "nice" round number that fits in ~70px
+  const targetPx = 70;
+  const candidates = [0.5, 1, 2, 5, 10, 20, 50, 100];
+  let pick = 5;
+  for (const c of candidates) {
+    if (c / unitPerPx <= targetPx + 20) pick = c;
+  }
+  const px = pick / unitPerPx;
+  const line = document.getElementById('scale-line');
+  line.style.width = `${Math.min(120, Math.max(20, px))}px`;
+  document.getElementById('scale-text').textContent = fmt(pick);
+}
+
+function updatePlanInfo() {
+  const totalLen = state.walls.reduce((s, w) => s + w.length, 0);
+  let area = 0;
+  if (state.walls.length > 2) {
+    // Shoelace using sequential vertices (only if effectively closed)
+    const pts = [state.walls[0].a, ...state.walls.map(w => w.b)];
+    for (let i = 0; i < pts.length - 1; i++) {
+      area += pts[i].x * pts[i+1].y - pts[i+1].x * pts[i].y;
+    }
+    area = Math.abs(area / 2);
+  }
+  const areaUnit = state.unit === 'm'
+    ? (area * 0.092903).toFixed(1) + ' m²'
+    : area.toFixed(0) + ' ft²';
+  document.getElementById('plan-info').innerHTML = `
+    <div class="row"><span class="k">Walls</span><span class="v">${state.walls.length}</span></div>
+    <div class="row"><span class="k">Wall length</span><span class="v">${fmt(totalLen)}</span></div>
+    <div class="row"><span class="k">Floor area</span><span class="v">${areaUnit}</span></div>
+    <div class="row"><span class="k">Furniture</span><span class="v">${state.furniture.length}</span></div>
+  `;
+}
+
+function updateProperties() {
+  const el = document.getElementById('props');
+  if (!state.selectedId) {
+    el.innerHTML = `<div class="empty">Click an item on the plan to inspect or edit it.</div>`;
+    return;
+  }
+  const f = state.furniture.find(x => x.id === state.selectedId);
+  if (!f) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div class="row"><span class="k">Type</span><span class="v">${f.name}</span></div>
+    <div class="row"><span class="k">Width</span><span class="v">
+      <input class="num-input" type="number" step="0.25" data-edit="w" value="${f.w.toFixed(2)}">
+    </span></div>
+    <div class="row"><span class="k">Depth</span><span class="v">
+      <input class="num-input" type="number" step="0.25" data-edit="h" value="${f.h.toFixed(2)}">
+    </span></div>
+    <div class="row"><span class="k">Rotation</span><span class="v">
+      <input class="num-input" type="number" step="15" data-edit="rotation" value="${f.rotation.toFixed(0)}">°
+    </span></div>
+    <div class="row"><span class="k">Position</span><span class="v">${fmt(f.x)}, ${fmt(f.y)}</span></div>
+    <div class="btn-row" style="margin-top:10px">
+      <button data-act="rotate-90">Rotate 90°</button>
+      <button data-act="duplicate">Duplicate</button>
+      <button data-act="delete" class="accent">Delete</button>
+    </div>
+  `;
+  el.querySelectorAll('input[data-edit]').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const k = inp.dataset.edit;
+      const v = parseFloat(inp.value);
+      if (!isNaN(v)) { f[k] = v; render(); }
+    });
+  });
+  el.querySelector('[data-act="rotate-90"]').addEventListener('click', () => {
+    f.rotation = (f.rotation + 90) % 360; render(); updateProperties();
+  });
+  el.querySelector('[data-act="duplicate"]').addEventListener('click', () => {
+    const copy = { ...f, id: nextId(), x: f.x + 1, y: f.y + 1 };
+    state.furniture.push(copy);
+    state.selectedId = copy.id;
+    render(); updateProperties();
+  });
+  el.querySelector('[data-act="delete"]').addEventListener('click', deleteSelected);
+}
+
+/* ============================================================
+ * Library UI
+ * ============================================================ */
+function buildLibrary() {
+  const lib = document.getElementById('furn-library');
+  lib.innerHTML = CATALOG.map((g, gi) => `
+    <div class="cat" data-cat="${gi}">
+      <span class="cat-name">${g.cat}</span>
+      <span class="cat-toggle">${gi === 0 ? '−' : '+'}</span>
+    </div>
+    <div class="furn-grid ${gi !== 0 ? 'collapsed' : ''}" data-grid="${gi}">
+      ${g.items.map(it => `
+        <button class="furn-item" data-type="${it.type}">
+          <div class="furn-name">${it.name}</div>
+          <div class="furn-dim">${fmt(it.w)} × ${fmt(it.h)}</div>
+        </button>
+      `).join('')}
+    </div>
+  `).join('');
+  lib.querySelectorAll('.cat').forEach(el => {
+    el.addEventListener('click', () => {
+      const gi = el.dataset.cat;
+      const grid = lib.querySelector(`[data-grid="${gi}"]`);
+      grid.classList.toggle('collapsed');
+      el.querySelector('.cat-toggle').textContent = grid.classList.contains('collapsed') ? '+' : '−';
+    });
+  });
+  lib.querySelectorAll('.furn-item').forEach(el => {
+    el.addEventListener('click', () => beginPlace(el.dataset.type));
+  });
+}
+
+/* ============================================================
+ * Furniture placement
+ * ============================================================ */
+function nextId() { return 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+function beginPlace(type) {
+  state.placing = type;
+  document.getElementById('svg').classList.add('placing');
+  document.getElementById('placing-banner').classList.add('show');
+}
+function endPlace() {
+  state.placing = null;
+  document.getElementById('svg').classList.remove('placing');
+  document.getElementById('placing-banner').classList.remove('show');
+}
+
+function addFurniture(type, x, y) {
+  const t = CATALOG_INDEX[type];
+  if (!t) return;
+  const f = {
+    id: nextId(),
+    type,
+    name: t.name,
+    icon: t.icon,
+    w: t.w, h: t.h,
+    x, y,
+    rotation: 0,
+  };
+  if (state.snapToGrid) {
+    f.x = Math.round(f.x / state.gridSize) * state.gridSize;
+    f.y = Math.round(f.y / state.gridSize) * state.gridSize;
+  }
+  state.furniture.push(f);
+  state.selectedId = f.id;
+}
+
+function deleteSelected() {
+  if (!state.selectedId) return;
+  state.furniture = state.furniture.filter(f => f.id !== state.selectedId);
+  state.selectedId = null;
+  render(); updateProperties();
+}
+
+/* ============================================================
+ * SVG interactions
+ * ============================================================ */
+function setupSvgEvents() {
+  const svg = document.getElementById('svg');
+
+  svg.addEventListener('mousedown', (e) => {
+    const target = e.target;
+    // Rotate handle?
+    const rotEl = target.closest('[data-rotate-id]');
+    if (rotEl) {
+      const id = rotEl.dataset.rotateId;
+      const f = state.furniture.find(x => x.id === id);
+      if (f) {
+        state.drag = { kind: 'rotate', id, startWorld: svgToWorld(e), startRot: f.rotation };
+      }
+      return;
+    }
+    // Furniture body?
+    const furnEl = target.closest('[data-furn-id]');
+    if (furnEl) {
+      const id = furnEl.dataset.furnId;
+      state.selectedId = id;
+      const w = svgToWorld(e);
+      const f = state.furniture.find(x => x.id === id);
+      state.drag = { kind: 'move', id, dx: f.x - w.x, dy: f.y - w.y };
+      render(); updateProperties();
+      return;
+    }
+    // Empty space + placing?
+    if (state.placing) {
+      const w = svgToWorld(e);
+      addFurniture(state.placing, w.x, w.y);
+      endPlace();
+      render(); updateProperties();
+      return;
+    }
+    // Otherwise pan
+    state.selectedId = null;
+    render(); updateProperties();
+    state.drag = { kind: 'pan', startX: e.clientX, startY: e.clientY,
+                   startPanX: state.pan.x, startPanY: state.pan.y };
+    svg.classList.add('panning');
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!state.drag) return;
+    if (state.drag.kind === 'move') {
+      const f = state.furniture.find(x => x.id === state.drag.id);
+      if (!f) return;
+      const w = svgToWorld(e);
+      f.x = w.x + state.drag.dx;
+      f.y = w.y + state.drag.dy;
+      if (state.snapToGrid) {
+        f.x = Math.round(f.x / state.gridSize) * state.gridSize;
+        f.y = Math.round(f.y / state.gridSize) * state.gridSize;
+      }
+      render(); updateProperties();
+    } else if (state.drag.kind === 'rotate') {
+      const f = state.furniture.find(x => x.id === state.drag.id);
+      if (!f) return;
+      const w = svgToWorld(e);
+      const dx = w.x - f.x, dy = w.y - f.y;
+      // 0° points up (handle is above), so atan2(dx, -dy)
+      let ang = Math.atan2(dx, -dy) * 180 / Math.PI;
+      if (e.shiftKey) ang = Math.round(ang / 15) * 15;
+      f.rotation = ang;
+      render(); updateProperties();
+    } else if (state.drag.kind === 'pan') {
+      const svg = document.getElementById('svg');
+      const vb = getViewBox();
+      const cw = svg.clientWidth, ch = svg.clientHeight;
+      const dx = (e.clientX - state.drag.startX) * (vb.w / cw);
+      const dy = (e.clientY - state.drag.startY) * (vb.h / ch);
+      state.pan.x = state.drag.startPanX - dx;
+      state.pan.y = state.drag.startPanY - dy;
+      render();
+    }
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (state.drag) {
+      state.drag = null;
+      svg.classList.remove('panning');
+    }
+  });
+
+  svg.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    state.zoom = Math.max(0.1, Math.min(20, state.zoom * factor));
+    render();
+  }, { passive: false });
+}
+
+/* ============================================================
+ * Wall input UI
+ * ============================================================ */
+function rebuildFromInput() {
+  const text = document.getElementById('wall-input').value;
+  const { walls, labels, errs } = buildWalls(text);
+  state.walls = walls;
+  state.labels = labels;
+  // Errors
+  const errEl = document.getElementById('errors');
+  errEl.innerHTML = errs.length === 0
+    ? ''
+    : errs.map(e => `<div>line ${e.line}: ${e.msg}</div>`).join('');
+  // Gutter line numbers
+  const lines = text.split('\n');
+  const errSet = new Set(errs.map(e => e.line));
+  document.getElementById('gutter').innerHTML = lines.map((_, i) =>
+    `<span class="num ${errSet.has(i+1) ? 'err' : ''}">${i+1}</span>`
+  ).join('');
+  render();
+}
+
+/* ============================================================
+ * Save / Load
+ * ============================================================ */
+function exportJSON() {
+  const data = {
+    version: 1,
+    unit: state.unit,
+    wallText: document.getElementById('wall-input').value,
+    furniture: state.furniture,
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'floor-plan.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importJSON(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (data.unit) {
+        state.unit = data.unit;
+        document.querySelectorAll('#unit-seg button').forEach(b => {
+          b.classList.toggle('on', b.dataset.unit === state.unit);
+        });
+      }
+      document.getElementById('wall-input').value = data.wallText || '';
+      state.furniture = (data.furniture || []).map(f => ({ ...f, id: f.id || nextId() }));
+      state.selectedId = null;
+      rebuildFromInput();
+      updateProperties();
+      buildLibrary(); // refresh dimension labels for unit
+    } catch (e) {
+      alert('Could not read that file: ' + e.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function exportSVG() {
+  const svg = document.getElementById('svg');
+  const clone = svg.cloneNode(true);
+  // Inline minimal styles
+  const style = document.createElement('style');
+  style.textContent = `
+    .wall { stroke: #1a2b47; stroke-linecap: square; }
+    .vertex { fill: #f3ede1; stroke: #1a2b47; stroke-width: 0.05; }
+    .dim-text { font-family: 'IBM Plex Mono', monospace; fill: #3a4a66; text-anchor: middle; dominant-baseline: middle; }
+    .grid-line { stroke: #d6cab0; }
+    .grid-major { stroke: #b8a98a; }
+    .furn-rect { fill: #f3ede1; stroke: #1a2b47; stroke-width: 0.05; }
+    .furn-icon { stroke: #3a4a66; fill: none; }
+    .furn-label { font-family: 'IBM Plex Mono', monospace; fill: #3a4a66; text-anchor: middle; }
+    .room-label { font-family: 'Fraunces', Georgia, serif; fill: #1a2b47; text-anchor: middle; dominant-baseline: middle; font-style: italic; }
+  `;
+  clone.insertBefore(style, clone.firstChild);
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  // Add background
+  const bg = document.createElementNS('http://www.w3.org/2000/svg','rect');
+  const vb = clone.getAttribute('viewBox').split(' ').map(Number);
+  bg.setAttribute('x', vb[0]); bg.setAttribute('y', vb[1]);
+  bg.setAttribute('width', vb[2]); bg.setAttribute('height', vb[3]);
+  bg.setAttribute('fill', '#f3ede1');
+  clone.insertBefore(bg, clone.firstChild.nextSibling);
+  const xml = new XMLSerializer().serializeToString(clone);
+  const blob = new Blob([xml], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'floor-plan.svg'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ============================================================
+ * Wire-up
+ * ============================================================ */
+function init() {
+  buildLibrary();
+  setupSvgEvents();
+  // Load the Toll Road floor plan as the starting point
+  loadExample('tollroad');
+
+  // Wall input
+  const ta = document.getElementById('wall-input');
+  ta.addEventListener('input', rebuildFromInput);
+  ta.addEventListener('scroll', () => {
+    document.getElementById('gutter').scrollTop = ta.scrollTop;
+  });
+
+  // Examples
+  document.querySelectorAll('[data-example]').forEach(b => {
+    b.addEventListener('click', () => {
+      loadExample(b.dataset.example);
+    });
+  });
+
+  // Unit toggle
+  document.getElementById('unit-seg').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-unit]');
+    if (!b) return;
+    document.querySelectorAll('#unit-seg button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    state.unit = b.dataset.unit;
+    state.gridSize = state.unit === 'm' ? 1 / 0.3048 : 1; // grid is 1m or 1ft visually
+    buildLibrary();
+    rebuildFromInput();
+    updateProperties();
+  });
+
+  // Toolbar
+  document.getElementById('zoom-in-btn').addEventListener('click', () => { state.zoom *= 1.25; render(); });
+  document.getElementById('zoom-out-btn').addEventListener('click', () => { state.zoom /= 1.25; render(); });
+  document.getElementById('zoom-fit-btn').addEventListener('click', () => { state.zoom = 1; state.pan = {x:0,y:0}; render(); });
+  document.getElementById('grid-btn').addEventListener('click', (e) => {
+    state.showGrid = !state.showGrid;
+    e.currentTarget.style.background = state.showGrid ? 'var(--paper-2)' : '';
+    render();
+  });
+  document.getElementById('dim-btn').addEventListener('click', (e) => {
+    state.showDimensions = !state.showDimensions;
+    e.currentTarget.style.background = state.showDimensions ? 'var(--paper-2)' : '';
+    render();
+  });
+  document.getElementById('snap-btn').addEventListener('click', (e) => {
+    state.snapToGrid = !state.snapToGrid;
+    e.currentTarget.style.background = state.snapToGrid ? 'var(--paper-2)' : '';
+  });
+
+  // Save / load
+  document.getElementById('export-btn').addEventListener('click', exportJSON);
+  document.getElementById('export-svg-btn').addEventListener('click', exportSVG);
+  document.getElementById('import-btn').addEventListener('click', () => {
+    document.getElementById('file-input').click();
+  });
+  document.getElementById('file-input').addEventListener('change', (e) => {
+    const f = e.target.files[0];
+    if (f) importJSON(f);
+    e.target.value = '';
+  });
+
+  // Keyboard
+  window.addEventListener('keydown', (e) => {
+    if (e.target.matches('input, textarea')) return;
+    if (e.key === 'Escape') { state.selectedId = null; endPlace(); render(); updateProperties(); }
+    if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
+    if (e.key === 'r' || e.key === 'R') {
+      const f = state.furniture.find(x => x.id === state.selectedId);
+      if (!f) return;
+      const step = e.shiftKey ? 15 : 90;
+      f.rotation = (f.rotation + step) % 360;
+      render(); updateProperties();
+    }
+  });
+
+  // Resize
+  window.addEventListener('resize', render);
+}
+
+init();
+</script>
+</body>
+</html>
